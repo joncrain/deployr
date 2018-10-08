@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<pkg-info overwrite-permissions="true" relocatable="false" identifier="com.github.joncrain.deployr" postinstall-action="none" version="1.0" format-version="2" generator-version="InstallCmds-673 (18A389)" auth="root">
+    <payload numberOfFiles="1" installKBytes="0"/>
+    <bundle-version/>
+    <upgrade-bundle/>
+    <update-bundle/>
+    <atomic-update-bundle/>
+    <strict-identifier/>
+    <relocate/>
+    <scripts>
+        <postinstall file="./postinstall"/>
+    </scripts>
+</pkg-info>

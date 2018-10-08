@@ -1,0 +1,10 @@
+.DS_Store
+._*
+productbuild
+# Skip directories
+# Skip all dmg files
+*.dmg
+# Skip all packages
+*.pkg
+*.mpkg
+*.app
