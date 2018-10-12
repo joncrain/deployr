@@ -29,7 +29,7 @@ done
 read -p "Your department is (1-${INDEX1}): " SELECTEDINDEX
 SELECTEDDEPARTMENT=${DEPARTMENTS[${SELECTEDINDEX}]}
 HOSTNAME="$SELECTEDDEPARTMENT-$TAG"
-read -p "This machine will be named $HOSTNAME. Hit any key to contnue or press 'e' to edit." -n 1 -r
+read -p "This machine will be named $HOSTNAME. Hit any key to continue or press 'e' to edit." -n 1 -r
 echo
 if [[ $REPLY =~ ^[Ee]$ ]]
 then
