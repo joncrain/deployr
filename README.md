@@ -13,4 +13,4 @@ In order to customize the name of an uninstalled machine, you need to customize 
 You will need to add the productbuild binary to this folder as well as the Recovery partition does not include this. `cp /usr/bin/productbuild ./script_package`
 You should then have the tools you need to build a package for use with startosinstall from within the Recovery partition. We are simply editing the postinstall script in the expanded package directory, so anything that is scriptable should be able to go in there to use. 
 
-I have split out the OS dmg from the deployr dmg because I hated waiting for Installr to finish making the dmg. You will need to download the OS you would like to install and create a dmg. I've included sample directories/scripts to do this. 
+I have split out the OS dmg from the deployr dmg because I hated waiting for Installr to finish making the dmg. You will need to download the OS you would like to install and create a dmg. Use make_install_dmg.sh to help with this. It takes one argument for the path to the macOS installer. 
