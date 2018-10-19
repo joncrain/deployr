@@ -82,7 +82,7 @@ EOL
 
 ##### Installr!
 installr () {
-	/usr/bin/hdiutil attach "$6/$1.dmg";
+	/usr/bin/hdiutil attach "$4/$2.dmg";
 	BASENAME=${0##*/}
 	THISDIR=${0%$BASENAME}
 	PACKAGESDIR="${THISDIR}packages"
@@ -98,15 +98,15 @@ installr () {
 	read -p "Erase target volume before install (y/N)? " ERASETARGET
 
 	case ${ERASETARGET:0:1} in
-		[yY] ) /usr/sbin/diskutil reformat "/Volumes/${2}" ;;
+		[yY] ) /usr/sbin/diskutil reformat "/Volumes/${3}" ;;
 		* ) echo ;;
 	esac
 
 	echo
-	echo "Installing macOS to /Volumes/${2}..."
+	echo "Installing macOS to /Volumes/${3}..."
 
 	# build our startosinstall command
-	CMD="\"${STARTOSINSTALL}\" --agreetolicense --volume \"/Volumes/${2}\" --installpackage /Volumes/final_script.pkg" 
+	CMD="\"${STARTOSINSTALL}\" --agreetolicense --volume \"/Volumes/${3}\" --installpackage /Volumes/final_script.pkg"
 
 	for ITEM in "${PACKAGESDIR}"/* ; do
 		FILENAME="${ITEM##*/}"
@@ -132,7 +132,7 @@ options=("$option1" "$option2" "$option3")
 
 echo "$title"
 PS3="$prompt "
-select opt in "${options[@]}" "Quit"; do 
+select opt in "${options[@]}" "Quit"; do
 
     case "$REPLY" in
 
@@ -160,7 +160,7 @@ EOL
 		EXTENSION="${FILENAME##*.}"
 		if [[ -e ${ITEM} ]]; then
 			case ${EXTENSION} in
-				sh ) 
+				sh )
 					if [[ -x ${ITEM} ]]; then
 						echo "running script:  ${FILENAME}"
 						# pass the selected volume to the script as $1
@@ -169,7 +169,7 @@ EOL
 						echo "${FILENAME} is not executable"
 					fi
 					;;
-				pkg ) 
+				pkg )
 					echo "install package: ${FILENAME}"
 					/usr/sbin/installer -pkg "${ITEM}" -target "/Volumes/${SELECTEDVOLUME}"
 					;;
@@ -191,14 +191,16 @@ EOL
 	esac
 	break;;
     2 ) echo "You picked $opt";
-	OS=highsierra
+    OS="Install macOS High Sierra"
+    NAME=Install_macOS_High_Sierra
 	create_installr_package "$TAG" "$LOCATION" "$INVENTORY" "$SELECTEDDEPARTMENT" "$HOSTNAME"
-	installr "$OS" "$SELECTEDVOLUME" "$DMG_LOCATION"
+	installr "$OS" "$NAME" "$SELECTEDVOLUME" "$DMG_LOCATION"
 	break;;
     3 ) echo "You picked $opt";
-	OS=mojave
+    OS="Install macOS Mojave"
+    NAME=Install_macOS_Mojave
 	create_installr_package "$TAG" "$LOCATION" "$INVENTORY" "$SELECTEDDEPARTMENT" "$HOSTNAME"
-	installr "$OS" "$SELECTEDVOLUME" "$DMG_LOCATION"
+	installr "$OS" "$NAME" "$SELECTEDVOLUME" "$DMG_LOCATION"
 	break;;
     $(( ${#options[@]}+1 )) ) echo "Goodbye!"; exit 0;;
     *) echo "Invalid option. Try another one.";continue;;
