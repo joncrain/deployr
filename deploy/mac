@@ -82,7 +82,7 @@ EOL
 
 ##### Installr!
 installr () {
-	/usr/bin/hdiutil attach "$3/$2.dmg";
+	/usr/bin/hdiutil attach "$4/$2.dmg";
 	BASENAME=${0##*/}
 	THISDIR=${0%$BASENAME}
 	PACKAGESDIR="${THISDIR}packages"
