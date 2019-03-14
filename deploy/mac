@@ -1,210 +1,305 @@
-#!/bin/bash
+#!/Volumes/deploy/Python.framework/Versions/2.7/bin/python
+# -*- coding: utf-8 -*-
 
-# deployr
-# A script to deploy macs! Built off of bootstrappr and installr
+import os
+import json
+import FoundationPlist
+import Foundation
+import AppKit
+import datetime
+import commands
+import subprocess
+import requests
+import shutil
+from nibbler import *
 
-if [[ $EUID != 0 ]] ; then
-    echo "deployr: Please run this as root, or via sudo."
-    exit -1
-fi
+now = datetime.datetime.now()
 
-DMG_LOCATION=""
+def install_path():
+    return os.path.dirname(os.path.realpath(__file__))
 
-echo "*** Welcome to deployr! ***"
-# Get some info about the workflow
-echo -e "What is your Global ID?"
-read GID
-echo -e "What is the tag number of this machine?"
-read TAG
-echo -e "Where will this machine be located?"
-read LOCATION
-echo -e "Select the department from the list below"
-DEPTARTMENTS="DEPT DEPT1 DEPT2"
-arr=($DEPARTMENTS)
-for DEPT in $DEPTARTMENTS; do
-	let INDEX1=${INDEX1}+1
-	DEPARTMENTS[${INDEX1}]=${DEPT}
-	echo "    ${INDEX1}  ${DEPT}"
-done
-read -p "Your department is (1-${INDEX1}): " SELECTEDINDEX
-SELECTEDDEPARTMENT=${DEPARTMENTS[${SELECTEDINDEX}]}
-HOSTNAME="$SELECTEDDEPARTMENT-$TAG"
-read -p "This machine will be named $HOSTNAME. Hit any key to continue or press 'e' to edit." -n 1 -r
-echo
-if [[ $REPLY =~ ^[Ee]$ ]]
-then
-	echo -e "What is the new hostname of the machine?"
-	read HOSTNAME
-	echo "This machine will be now be named $HOSTNAME"
-	echo
-fi
-INVENTORY="$(date +%Y-%m-%d) $GID"
+try:
+    script_path = os.path.dirname(os.path.realpath(__file__))
+    n = Nibbler(os.path.join(script_path, 'deployr.nib'))
+except IOError, ImportError:
+    print "Unable to load nib!"
+    exit(20)
+Quiting = False
 
-INDEX=0
-OLDIFS=$IFS
-IFS=$'\n'
+IOKit_bundle = NSBundle.bundleWithIdentifier_('com.apple.framework.IOKit')
 
-echo "Select the destination volume:"
-for VOL in $(/bin/ls -1 /Volumes) ; do
-    if [[ "${VOL}" != "OS X Base System" ]] && [[ "${VOL}" != "deploy" ]] ; then
-        let INDEX=${INDEX}+1
-        VOLUMES[${INDEX}]=${VOL}
-        echo "    ${INDEX}  ${VOL}"
-    fi
-done
-read -p "Install to volume # (1-${INDEX}): " SELECTEDINDEX
+functions = [
+    ("IOServiceGetMatchingService", b"II@"),
+    ("IOServiceMatching", b"@*"),
+    ("IORegistryEntryCreateCFProperty", b"@I@@I"),
+]
 
-SELECTEDVOLUME=${VOLUMES[${SELECTEDINDEX}]}
+objc.loadBundleFunctions(IOKit_bundle, globals(), functions)
 
-if [[ "${SELECTEDVOLUME}" == "" ]]; then
-    exit 0
-fi
+def io_key(keyname):
+    '''
+    frogor/pudquick magic
+    '''
+    return IORegistryEntryCreateCFProperty(IOServiceGetMatchingService(0,\
+     IOServiceMatching("IOPlatformExpertDevice")), keyname, None, 0)
 
-#### Create package for installr
-create_installr_package () {
-	mkdir -p "/Volumes/packages"
-	current_dir="/Volumes/packages"
-	cp -r /Volumes/deploy/script_package/ $current_dir
-	cat  > $current_dir/tmp/Scripts/postinstall <<EOL
-#!/bin/bash
-defaults write /Library/Preferences/com.apple.RemoteDesktop.plist Text1 -string "$1"
-defaults write /Library/Preferences/com.apple.RemoteDesktop.plist Text2 -string "$2"
-defaults write /Library/Preferences/com.apple.RemoteDesktop.plist Text3 -string "$3"
-defaults write /Library/Preferences/com.apple.RemoteDesktop.plist Text4 -string "$4"
-/usr/sbin/scutil --set ComputerName "$5"
-/usr/sbin/scutil --set LocalHostName "$5"
-/usr/sbin/scutil --set HostName "$5"
-EOL
-	/usr/sbin/pkgutil --flatten $current_dir/tmp/ $current_dir/script.pkg
-	/Volumes/deploy/script_package/productbuild -p $current_dir/script.pkg /Volumes/final_script.pkg
-	rm -rf $current_dir/
-}
+def get_hardware_serial():
+    '''
+    Get's serial directly from the Board via frogor magic
+    '''
+    return io_key("IOPlatformSerialNumber")
 
-##### Installr!
-installr () {
-	/usr/bin/hdiutil attach "$4/$2.dmg";
-	BASENAME=${0##*/}
-	THISDIR=${0%$BASENAME}
-	PACKAGESDIR="${THISDIR}packages"
-	VOLUME="/Volumes/$1/"
-	INSTALLMACOSAPP=$(echo "${VOLUME}Install macOS"*.app)
-	STARTOSINSTALL=$(echo "${VOLUME}Install macOS"*.app/Contents/Resources/startosinstall)
+def get_config_code(serial):
+    if len(serial) > 11:
+        configcode = serial[-4:]
+    else:
+        configcode = serial[-3:]
+    return configcode
 
-	if [ ! -e "$STARTOSINSTALL" ]; then
-		echo "Can't find an Install macOS app containing startosinstall in this script's directory!"
-		exit -1
-	fi
+def get_image_url():
+    code = get_config_code(get_hardware_serial())
+    urlbase = 'https://km.support.apple.com/kb/securedImage.jsp?&size=240x240&configcode='
+    finalurl = urlbase+code
+    return finalurl
 
-	read -p "Erase target volume before install (y/N)? " ERASETARGET
+def quitgui():
+    '''
+    Quit GUI and Script
+    '''
+    n.quit()
+    sys.exit()
 
-	case ${ERASETARGET:0:1} in
-		[yY] ) /usr/sbin/diskutil reformat "/Volumes/${3}" ;;
-		* ) echo ;;
-	esac
+def get_volumes():
+    volumes = []
+    for volume in os.listdir('/Volumes'):
+        excluded_volumes = deployr_prefs('excluded_volumes')
+        if volume not in excluded_volumes:
+            volumes.append(volume)
+    return volumes
 
-	echo
-	echo "Installing macOS to /Volumes/${3}..."
+def get_packages():
+    packages = []
+    for package in os.listdir(install_path() + '/packages/'):
+        excluded_files = ['packages_to_install_go_here', '.DS_Store']
+        if package not in excluded_files:
+            packages.append(package)
+        packages.sort()
+    return packages     
 
-	# build our startosinstall command
-	CMD="\"${STARTOSINSTALL}\" --agreetolicense --volume \"/Volumes/${3}\" --installpackage /Volumes/final_script.pkg"
+def get_selected(item):
+    '''
+    Returns the selected items from the GUI
+    '''
+    item = n.views[item].titleOfSelectedItem()
+    return item
 
-	for ITEM in "${PACKAGESDIR}"/* ; do
-		FILENAME="${ITEM##*/}"
-		EXTENSION="${FILENAME##*.}"
-		if [[ -e ${ITEM} ]]; then
-			case ${EXTENSION} in
-				pkg ) CMD="${CMD} --installpackage \"${ITEM}\"" ;;
-				* ) echo "    ignoring non-package ${ITEM}..." ;;
-			esac
-		fi
-	done
+def get_string(item):
+    '''
+    Returns the string items from the GUI
+    '''
+    item = n.views[item].stringValue()
+    return item
 
-	# kick off the OS install
-	eval $CMD
-}
+def get_button(item):
+    '''
+    Returns the string items from the GUI
+    '''
+    item = n.views[item].state()
+    return item
 
-option1="Bootstrap machine with preinstalled OS. Will install and configure munki."
-option2="Install High Sierra and bootstrap munki."
-option3="Install Mojave and bootstrap munki."
-title="Select your workflow"
-prompt="Pick an option:"
-options=("$option1" "$option2" "$option3")
+def shell_out(cmd):
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out, err = proc.communicate()
+    print out
+    print err
 
-echo "$title"
-PS3="$prompt "
-select opt in "${options[@]}" "Quit"; do
+def mount_os_installer(os_name):
+    installer_path = deployr_prefs('dmg_location') + os_name + '.dmg'
+    cmd = ['/usr/bin/hdiutil', 'attach', installer_path]
+    shell_out(cmd)
 
-    case "$REPLY" in
+def send_notification():
+    print "sending notifications"
+    # machine_name = get_string('box_1')
+    # ard_1 = get_string('box_2')
+    # ard_2 = get_string('box_3')
+    # ard_3 = get_string('box_4')
+    # ard_4 = get_selected('selector_1')
+    # serial_number = get_hardware_serial()
+    # install_type = get_selected('install_type')
+    # webhook_url = ""
+    # json_payload = {}
+    # requests.post(url=webhook_url, json=json_payload)
 
-    1 ) echo "You picked $opt";
-	defaults write /Volumes/${SELECTEDVOLUME}/Library/Preferences/com.apple.RemoteDesktop.plist Text1 -string "$TAG"
-	defaults write /Volumes/${SELECTEDVOLUME}/Library/Preferences/com.apple.RemoteDesktop.plist Text2 -string "$LOCATION"
-	defaults write /Volumes/${SELECTEDVOLUME}/Library/Preferences/com.apple.RemoteDesktop.plist Text3 -string "$INVENTORY"
-	defaults write /Volumes/${SELECTEDVOLUME}/Library/Preferences/com.apple.RemoteDesktop.plist Text4 -string "$DEPARTMENT"
-	OUTSET="/Volumes/${SELECTEDVOLUME}/usr/local/outset/boot-once"
-	mkdir -p $OUTSET
-	cat  > $OUTSET/name.sh <<EOL
-#!/bin/bash
-/usr/sbin/scutil --set ComputerName "$HOSTNAME"
-/usr/sbin/scutil --set LocalHostName "$HOSTNAME"
-/usr/sbin/scutil --set HostName "$HOSTNAME"
-EOL
-	chmod 755 $OUTSET/name.sh
-	echo
-	echo "Installing packages to /Volumes/${SELECTEDVOLUME}..."
-	BASENAME=${0##*/}
-	THISDIR=${0%$BASENAME}
-	PACKAGESDIR="${THISDIR}packages"
-	for ITEM in "${PACKAGESDIR}"/* ; do
-		FILENAME="${ITEM##*/}"
-		EXTENSION="${FILENAME##*.}"
-		if [[ -e ${ITEM} ]]; then
-			case ${EXTENSION} in
-				sh )
-					if [[ -x ${ITEM} ]]; then
-						echo "running script:  ${FILENAME}"
-						# pass the selected volume to the script as $1
-						${ITEM} "/Volumes/${SELECTEDVOLUME}"
-					else
-						echo "${FILENAME} is not executable"
-					fi
-					;;
-				pkg )
-					echo "install package: ${FILENAME}"
-					/usr/sbin/installer -pkg "${ITEM}" -target "/Volumes/${SELECTEDVOLUME}"
-					;;
-				* ) echo "unsupported file extension: ${ITEM}" ;;
-			esac
-		fi
-	done
-	echo
-	echo "Packages installed. What now?"
-	echo "    1  Restart"
-	echo "    2  Shut down"
-	echo "    3  Quit"
-	read -p "Pick an action # (1-3): " WHATNOW
+def install_packages():
+    destination_volume = '/Volumes/' + get_selected('destination')
+    for package in get_packages():
+        package_path = install_path() + '/packages/' + package
+        cmd = ['/usr/sbin/installer', '-pkg', package_path, '-target', destination_volume]
+        shell_out(cmd)
 
-	case $WHATNOW in
-		1 ) /sbin/shutdown -r now ;;
-		2 ) /sbin/shutdown -h now ;;
-		3 ) echo ;;
-	esac
-	break;;
-    2 ) echo "You picked $opt";
-    OS="Install macOS High Sierra"
-    NAME=Install_macOS_High_Sierra
-	create_installr_package "$TAG" "$LOCATION" "$INVENTORY" "$SELECTEDDEPARTMENT" "$HOSTNAME"
-	installr "$OS" "$NAME" "$SELECTEDVOLUME" "$DMG_LOCATION"
-	break;;
-    3 ) echo "You picked $opt";
-    OS="Install macOS Mojave"
-    NAME=Install_macOS_Mojave
-	create_installr_package "$TAG" "$LOCATION" "$INVENTORY" "$SELECTEDDEPARTMENT" "$HOSTNAME"
-	installr "$OS" "$NAME" "$SELECTEDVOLUME" "$DMG_LOCATION"
-	break;;
-    $(( ${#options[@]}+1 )) ) echo "Goodbye!"; exit 0;;
-    *) echo "Invalid option. Try another one.";continue;;
+def create_installr_package():
+    package_dir = '/Volumes/packages'
+    script_packages = install_path() + '/script_package/'
+    shutil.copytree(script_packages, package_dir)
+    postinstall_dir = package_dir + '/tmp/Scripts/'
+    if not os.path.exists(postinstall_dir):
+        os.makedirs(postinstall_dir)
+    machine_name = get_string('box_1')
+    ard_1 = get_string('box_2')
+    ard_2 = get_string('box_3')
+    ard_3 = get_string('box_4')
+    ard_4 = get_selected('selector_1')
+    serial_number = get_hardware_serial()
+    postinstall_text = '''#!/bin/bash
+defaults write /Library/Preferences/com.apple.RemoteDesktop.plist Text1 -string %s
+defaults write /Library/Preferences/com.apple.RemoteDesktop.plist Text2 -string %s
+defaults write /Library/Preferences/com.apple.RemoteDesktop.plist Text3 -string %s
+defaults write /Library/Preferences/com.apple.RemoteDesktop.plist Text4 -string %s    
+/usr/sbin/scutil --set ComputerName %s
+/usr/sbin/scutil --set ComputerName %s
+/usr/sbin/scutil --set ComputerName %s
+    ''' % (ard_1, ard_2, ard_3, ard_4, machine_name, machine_name, machine_name)
+    postinstall = postinstall_dir + '/postinstall'
+    with open(postinstall, 'w') as f:
+        f.writelines(postinstall_text)
+    os.chmod(postinstall, 509)
+    cmd = ['/usr/sbin/pkgutil', '--flatten', package_dir + '/tmp/', package_dir + '/script.pkg']
+    shell_out(cmd)
+    final_package = '/Volumes/final_script.pkg'
+    cmd = [install_path() + '/script_package/productbuild', '-p', package_dir + '/script.pkg', final_package]
+    shell_out(cmd)
+    
+def bootstrappr():
+    send_notification()
+    destination_volume = '/Volumes/' + get_selected('destination')
+    ard = dict()
+    machine_name = get_string('box_1')
+    ard['Text1'] = get_string('box_2')
+    ard['Text2'] = get_string('box_3')
+    ard['Text3'] = get_string('box_4')
+    ard['Text4'] = get_selected('selector_1')
+    ard_plist = destination_volume + '/Library/Preferences/com.apple.RemoteDesktop.plist'
 
-    esac
+    try:
+        FoundationPlist.writePlist(ard, ard_plist)
+    except:
+        print "Unable to write plist!"
+        n.quit()
+    outset = destination_volume + '/usr/local/outset/boot-once'
+    if not os.path.exists(outset):
+        os.makedirs(outset)
+    line1 = '#!/bin/bash'
+    line2 = '/usr/sbin/scutil --set ComputerName ' + machine_name
+    line3 = '/usr/sbin/scutil --set ComputerName ' + machine_name
+    line4 = '/usr/sbin/scutil --set ComputerName ' + machine_name
+    lines = [line1,line2,line3,line4]
+    name = outset + '/name.sh'
+    with open(name, 'w') as f:
+        f.writelines("%s\n" % l for l in lines)
+    os.chmod(name, 509)
+    install_packages()
+    print 'Packages were installed successfully, please reboot the machine.'
 
-done
+def check_for_erase_destination(volume):
+    if get_button('erase') == 1:
+        cmd = ['/usr/sbin/diskutil', 'reformat',  volume]
+        shell_out(cmd)
+
+def installr(os_name):
+    mount_os_installer(os_name)
+    send_notification()
+    os_install_volume = '/Volumes/' + os_name + '/'
+    for file in os.listdir(os_install_volume):
+        if file.startswith("Install"):
+            install_macos = file
+    installer_path = os_install_volume + install_macos
+    create_installr_package()
+    destination_volume = '/Volumes/' + get_selected('destination')
+    check_for_erase_destination(destination_volume)
+    start_os_install = installer_path + '/Contents/Resources/startosinstall'
+    cmd = [start_os_install, '--agreetolicense', '--volume', destination_volume, '--installpackage', '/Volumes/final_script.pkg']
+    for package in get_packages():
+        package_path = install_path() + '/packages/' + package
+        cmd.append('--installpackage')
+        cmd.append(package_path)
+    shell_out(cmd)
+    exit()
+
+def install():
+    '''
+    Figures out what type of install
+    '''
+    install_type = get_selected('install_type')
+    if install_type.startswith("Bootstrap"):
+        bootstrappr()
+    elif install_type.startswith("Install"):
+        if "Mojave" in install_type:
+            installr("mojave")
+        elif "High Sierra" in install_type:
+            installr("highsierra")
+
+    n.quit()
+
+def list_values(list,list_values):
+    n.views[list].removeAllItems()
+    n.views[list].addItemsWithTitles_(list_values)
+
+def deployr_prefs(item):
+    # local json path - if it exists already, let's assume someone is bundling
+    # it with their package. This is stolen from nudge
+    json_path = os.path.join(install_path(), 'deployr.json')
+    if os.path.isfile(json_path):
+        json_raw = open(json_path).read()
+
+    # Load up file to grab all the items.
+    deployr_json = json.loads(json_raw)
+
+    # Load deployr preferences
+    deployr_prefs = deployr_json['preferences']
+
+    return deployr_prefs[item]
+
+def erase_destination_gui():
+    install_type = get_selected('install_type')
+    print install_type
+    if install_type.startswith("Install"):
+        n.views['erase'].setEnabled_(True)
+    else:
+        n.views['erase'].setEnabled_(False)
+
+def set_object_title(item):
+    # Helps to define the titles of the interface
+    n.views[item].setStringValue_(deployr_prefs(item))
+
+def enable_gui_item(item):
+    if deployr_prefs(item + '_enabled') == False:
+        n.views[item + '_title'].setHidden_(True)
+        n.views[item].setHidden_(True)
+
+def main():
+    '''
+    define the interface
+    '''
+    url = Foundation.NSURL.URLWithString_(get_image_url())
+    imagedata = Foundation.NSData.dataWithContentsOfURL_(url)
+    image = AppKit.NSImage.alloc().initWithData_(imagedata)
+    n.views['machine_deviceimage'].setImage_(image)
+    gui_objects = ['box_1','box_2','box_3','box_4','selector_1','install_types','destination']
+    for object in gui_objects:
+        set_object_title(object + '_title')
+        enable_gui_item(object)
+
+    n.attach(n.views['serialfield'].setStringValue_(get_hardware_serial()),'serialfield')
+    list_values('selector_1', deployr_prefs('selector_1'))
+    list_values('install_type', deployr_prefs('install_types'))
+    list_values('destination', get_volumes())
+
+    n.attach(install, 'install')
+    n.attach(quitgui, 'cancel')
+
+    n.hidden = True
+    n.run()
+
+if __name__ == "__main__":
+    main()

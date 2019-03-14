@@ -1,0 +1,22 @@
+{
+    "preferences": {
+        "box_1_enabled":true,
+        "box_1_title": "Machine Name",
+        "box_2_enabled":true,
+        "box_2_title": "ARD 1",
+        "box_3_enabled":true,
+        "box_3_title": "ARD 2",
+        "box_4_enabled":true,
+        "box_4_title": "ARD 3",
+        "selector_1_enabled":true,
+        "selector_1_title": "ARD 4",
+        "selector_1": ["","Selection 1", "Selection 2"],
+        "install_types_enabled":true,
+        "install_types_title": "Installation Type",
+        "install_types": ["","Bootstrap Machine","Install High Sierra and Bootstrap","Install Mojave and Bootstrap"],
+        "destination_enabled":true,
+        "destination_title": "Destination Volume",
+        "dmg_location": "http://url_to_macos_dmg/",
+        "excluded_volumes": ["Recovery", "OS X Base System", "deploy", "Image Volume"]
+    }
+}
